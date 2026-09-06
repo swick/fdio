@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: Copyright © the fdio contributors
+
+[package]
+name = "fdio"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+bitflags = "2.4.0"
+rustix = { version = "1", features = ["fs", "mount", "process", "rand"] }
+
+[dev-dependencies]
+tempfile = "3"
