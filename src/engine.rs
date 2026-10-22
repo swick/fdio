@@ -203,8 +203,10 @@ impl RemainingPath {
         let remaining = &self.buffer[self.offset..];
         let mut new_buf = Vec::with_capacity(link.len() + 1 + remaining.len());
         new_buf.extend_from_slice(link);
-        new_buf.push(b'/');
-        new_buf.extend_from_slice(remaining);
+        if !remaining.is_empty() {
+            new_buf.push(b'/');
+            new_buf.extend_from_slice(remaining);
+        }
         self.buffer = new_buf;
         self.offset = 0;
     }
