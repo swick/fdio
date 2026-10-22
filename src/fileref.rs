@@ -411,6 +411,7 @@ impl AsFd for Root {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ChaseError;
     use rustix::fs::{AtFlags, StatxFlags};
     use std::os::unix::io::OwnedFd;
 
@@ -635,7 +636,10 @@ mod tests {
         let err = child
             .do_resolve::<Any>(c"../..", ChaseFlags::DEBUG_NO_OPENAT2, None, false)
             .unwrap_err();
-        assert_eq!(err.raw_os_error(), Some(Errno::XDEV.raw_os_error()));
+        assert_eq!(
+            err.get_ref().unwrap().downcast_ref::<ChaseError>().unwrap().errno(),
+            Errno::XDEV,
+        );
     }
 
     #[test]

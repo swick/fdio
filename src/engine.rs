@@ -8,6 +8,7 @@ use rustix::fs::{self, openat2, AtFlags, FileType, Mode, OFlags, ResolveFlags, S
 use rustix::io::Errno;
 use rustix::mount::{open_tree, OpenTreeFlags};
 use std::ffi::{CStr, CString};
+use std::io;
 use std::os::unix::io::{AsFd, BorrowedFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -61,6 +62,51 @@ const RESOLVE_FLAGS: ChaseFlags = ChaseFlags::RESOLVE_BENEATH
 
 static CAN_OPEN_TREE: AtomicBool = AtomicBool::new(true);
 static CAN_OPENAT2: AtomicBool = AtomicBool::new(true);
+
+#[derive(Debug)]
+pub struct ChaseError {
+    errno: Errno,
+    context: &'static str,
+}
+
+impl ChaseError {
+    fn new(errno: Errno, context: &'static str) -> Self {
+        Self { errno, context }
+    }
+
+    pub fn errno(&self) -> Errno {
+        self.errno
+    }
+
+    pub fn context(&self) -> &'static str {
+        self.context
+    }
+}
+
+impl std::fmt::Display for ChaseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let desc = io::Error::from(self.errno);
+        if self.context.is_empty() {
+            write!(f, "{desc}")
+        } else {
+            write!(f, "{}: {desc}", self.context)
+        }
+    }
+}
+
+impl std::error::Error for ChaseError {}
+
+impl From<Errno> for ChaseError {
+    fn from(errno: Errno) -> Self {
+        Self { errno, context: "" }
+    }
+}
+
+impl From<ChaseError> for io::Error {
+    fn from(e: ChaseError) -> io::Error {
+        io::Error::new(io::Error::from(e.errno).kind(), e)
+    }
+}
 
 #[derive(Clone, Copy)]
 struct StatxNode {
@@ -328,7 +374,7 @@ fn chase_manual(
     path: &CStr,
     flags: ChaseFlags,
     mut callback: Option<&mut ChaseCallback<'_>>,
-) -> Result<OwnedFd, Errno> {
+) -> Result<OwnedFd, ChaseError> {
     let path_bytes = path.to_bytes();
     let path_is_absolute = path_bytes.first() == Some(&b'/');
 
@@ -339,11 +385,11 @@ fn chase_manual(
     if (flags & (ChaseFlags::NO_AUTOMOUNT | RESOLVE_FLAGS)) == ChaseFlags::NO_AUTOMOUNT
         && callback.is_none()
     {
-        return open_path(
+        return Ok(open_path(
             dirfd,
             path,
             ChaseFlags::NO_AUTOMOUNT | (flags & (ChaseFlags::NOFOLLOW | DEBUG_FLAGS)),
-        );
+        )?);
     }
 
     let no_automount = if flags.contains(ChaseFlags::NO_AUTOMOUNT) {
@@ -356,8 +402,7 @@ fn chase_manual(
     let root: BorrowedFd<'_>;
 
     if path_is_absolute && flags.contains(ChaseFlags::RESOLVE_BENEATH) {
-        // Absolute paths always get rejected with RESOLVE_BENEATH.
-        return Err(Errno::XDEV);
+        return Err(ChaseError::new(Errno::XDEV, "absolute path not allowed with RESOLVE_BENEATH"));
     } else if !path_is_absolute || flags.contains(ChaseFlags::RESOLVE_IN_ROOT) {
         // The absolute path is relative to dirfd with RESOLVE_IN_ROOT, and
         // a relative path is always relative. In both cases we use dirfd as
@@ -387,9 +432,7 @@ fn chase_manual(
         // allowed here!
         if seg.is_dot_dot {
             if path_st.len() <= 1 && flags.contains(ChaseFlags::RESOLVE_BENEATH) {
-                // With RESOLVE_BENEATH, error out if we would end up above
-                // the root fd.
-                return Err(Errno::XDEV);
+                return Err(ChaseError::new(Errno::XDEV, "\"..\" above root with RESOLVE_BENEATH"));
             } else if path_st.len() <= 1 && flags.contains(ChaseFlags::RESOLVE_IN_ROOT) {
                 // With RESOLVE_IN_ROOT, we pretend that we hit the real
                 // root, and stay there, just like the kernel does.
@@ -418,16 +461,19 @@ fn chase_manual(
         {
             // ...however, we do not resolve symlinks with NO_SYMLINKS, and
             // use remaining_follows to ensure we don't loop forever.
+            if flags.contains(ChaseFlags::RESOLVE_NO_SYMLINKS) {
+                return Err(ChaseError::new(Errno::LOOP, "symlink not allowed with RESOLVE_NO_SYMLINKS"));
+            }
             remaining_follows -= 1;
-            if flags.contains(ChaseFlags::RESOLVE_NO_SYMLINKS) || remaining_follows <= 0 {
-                return Err(Errno::LOOP);
+            if remaining_follows <= 0 {
+                return Err(ChaseError::new(Errno::LOOP, "too many symlinks"));
             }
 
             let link = fs::readlinkat(next_fd.as_fd(), "", Vec::new())?.into_bytes();
             let link_is_absolute = link.first() == Some(&b'/');
 
             if link_is_absolute && flags.contains(ChaseFlags::RESOLVE_BENEATH) {
-                return Err(Errno::XDEV);
+                return Err(ChaseError::new(Errno::XDEV, "absolute symlink not allowed with RESOLVE_BENEATH"));
             }
 
             remaining_path.prepend_symlink(&link);
@@ -461,7 +507,7 @@ fn chase_manual(
 
             if let Some(lower) = path_st.last() {
                 if !st.mount_same(lower) || !st.inode_same(lower) {
-                    return Err(Errno::XDEV);
+                    return Err(ChaseError::new(Errno::XDEV, "parent directory changed during traversal"));
                 }
             }
         } else {
@@ -472,7 +518,7 @@ fn chase_manual(
         // directory. We need the fd to be a directory though, to open the
         // next segment from.
         if !seg.is_last && st.file_type != FileType::Directory {
-            return Err(Errno::NOTDIR);
+            return Err(ChaseError::new(Errno::NOTDIR, "non-final path segment is not a directory"));
         }
 
         current = Some(next_fd);
@@ -507,7 +553,7 @@ pub fn chaseat(
     path: &CStr,
     flags: ChaseFlags,
     callback: Option<&mut ChaseCallback<'_>>,
-) -> Result<OwnedFd, Errno> {
+) -> Result<OwnedFd, ChaseError> {
     assert!(
         (flags & MUST_BE_FLAGS).bits().count_ones() <= 1,
         "at most one MUST_BE flag"
@@ -561,7 +607,7 @@ pub fn chaseat(
             Err(Errno::NOSYS | Errno::PERM) => {
                 CAN_OPENAT2.store(false, Ordering::Relaxed);
             }
-            Err(err) => return Err(err),
+            Err(err) => return Err(err.into()),
         }
     }
 
@@ -580,23 +626,22 @@ pub fn chaseat(
         let ft = StatxFileType::new(fd.as_fd(), no_automount)?;
 
         if flags.contains(ChaseFlags::MUST_BE_REGULAR) && ft != FileType::RegularFile {
-            return Err(if ft == FileType::Directory {
-                Errno::ISDIR
-            } else {
-                Errno::BADFD
-            });
+            return Err(ChaseError::new(
+                if ft == FileType::Directory { Errno::ISDIR } else { Errno::BADFD },
+                "not a regular file",
+            ));
         }
 
         if flags.contains(ChaseFlags::MUST_BE_DIRECTORY) && ft != FileType::Directory {
-            return Err(Errno::NOTDIR);
+            return Err(ChaseError::new(Errno::NOTDIR, "not a directory"));
         }
 
         if flags.contains(ChaseFlags::MUST_BE_SOCKET) && ft != FileType::Socket {
-            return Err(Errno::NOTSOCK);
+            return Err(ChaseError::new(Errno::NOTSOCK, "not a socket"));
         }
 
         if flags.contains(ChaseFlags::MUST_BE_SYMLINK) && ft != FileType::Symlink {
-            return Err(Errno::INVAL);
+            return Err(ChaseError::new(Errno::INVAL, "not a symlink"));
         }
     }
 
@@ -618,7 +663,7 @@ mod tests {
         .stx_ino
     }
 
-    fn chase(dfd: &impl AsFd, path: &CStr, flags: ChaseFlags) -> Result<OwnedFd, Errno> {
+    fn chase(dfd: &impl AsFd, path: &CStr, flags: ChaseFlags) -> Result<OwnedFd, ChaseError> {
         chaseat(dfd, path, flags, None)
     }
 
@@ -640,10 +685,10 @@ mod tests {
 
     fn check_chase_error(dfd: &impl AsFd, path: &CStr, flags: ChaseFlags, expected: Errno) {
         let err = chase(dfd, path, flags).unwrap_err();
-        assert_eq!(err, expected);
+        assert_eq!(err.errno(), expected);
 
         let err = chase(dfd, path, flags | ChaseFlags::DEBUG_NO_OPENAT2).unwrap_err();
-        assert_eq!(err, expected);
+        assert_eq!(err.errno(), expected);
 
         let err = chase(
             dfd,
@@ -651,7 +696,7 @@ mod tests {
             flags | ChaseFlags::DEBUG_NO_OPENAT2 | ChaseFlags::DEBUG_NO_OPEN_TREE,
         )
         .unwrap_err();
-        assert_eq!(err, expected);
+        assert_eq!(err.errno(), expected);
     }
 
     fn symlinkat(target: &CStr, dirfd: BorrowedFd<'_>, linkpath: &CStr) {

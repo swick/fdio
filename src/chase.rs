@@ -6,7 +6,7 @@ use std::any::{Any, TypeId};
 use std::ffi::CStr;
 use std::os::unix::io::{AsFd, BorrowedFd, OwnedFd};
 
-use crate::engine::{chaseat, ChaseCallback, ChaseFlags};
+use crate::engine::{chaseat, ChaseCallback, ChaseError, ChaseFlags};
 
 /// A step in the chase callback chain.
 ///
@@ -108,7 +108,7 @@ impl<'a> Chase<'a> {
     ///
     /// After resolution, `finish()` is called on each step and results
     /// are collected into [`ChaseResult`].
-    pub fn resolve(self, path: &CStr) -> Result<ChaseResult, Errno> {
+    pub fn resolve(self, path: &CStr) -> Result<ChaseResult, ChaseError> {
         let mut steps = self.steps;
 
         let fd = if steps.is_empty() {

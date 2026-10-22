@@ -8,7 +8,7 @@ mod ops;
 mod steps;
 
 pub use chase::{Chase, ChaseResult, ChaseStep};
-pub use engine::{chaseat, ChaseCallback, ChaseFlags};
+pub use engine::{chaseat, ChaseCallback, ChaseError, ChaseFlags};
 pub use fileref::{
     Any, Dir, FileRef, LookupFlags, Regular, ResolveFlags, ResolveMode, Root, Socket, Symlink,
 };
