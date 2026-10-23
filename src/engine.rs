@@ -402,7 +402,10 @@ fn chase_manual(
     let root: BorrowedFd<'_>;
 
     if path_is_absolute && flags.contains(ChaseFlags::RESOLVE_BENEATH) {
-        return Err(ChaseError::new(Errno::XDEV, "absolute path not allowed with RESOLVE_BENEATH"));
+        return Err(ChaseError::new(
+            Errno::XDEV,
+            "absolute path not allowed with RESOLVE_BENEATH",
+        ));
     } else if !path_is_absolute || flags.contains(ChaseFlags::RESOLVE_IN_ROOT) {
         // The absolute path is relative to dirfd with RESOLVE_IN_ROOT, and
         // a relative path is always relative. In both cases we use dirfd as
@@ -432,7 +435,10 @@ fn chase_manual(
         // allowed here!
         if seg.is_dot_dot {
             if path_st.len() <= 1 && flags.contains(ChaseFlags::RESOLVE_BENEATH) {
-                return Err(ChaseError::new(Errno::XDEV, "\"..\" above root with RESOLVE_BENEATH"));
+                return Err(ChaseError::new(
+                    Errno::XDEV,
+                    "\"..\" above root with RESOLVE_BENEATH",
+                ));
             } else if path_st.len() <= 1 && flags.contains(ChaseFlags::RESOLVE_IN_ROOT) {
                 // With RESOLVE_IN_ROOT, we pretend that we hit the real
                 // root, and stay there, just like the kernel does.
@@ -462,7 +468,10 @@ fn chase_manual(
             // ...however, we do not resolve symlinks with NO_SYMLINKS, and
             // use remaining_follows to ensure we don't loop forever.
             if flags.contains(ChaseFlags::RESOLVE_NO_SYMLINKS) {
-                return Err(ChaseError::new(Errno::LOOP, "symlink not allowed with RESOLVE_NO_SYMLINKS"));
+                return Err(ChaseError::new(
+                    Errno::LOOP,
+                    "symlink not allowed with RESOLVE_NO_SYMLINKS",
+                ));
             }
             remaining_follows -= 1;
             if remaining_follows <= 0 {
@@ -473,7 +482,10 @@ fn chase_manual(
             let link_is_absolute = link.first() == Some(&b'/');
 
             if link_is_absolute && flags.contains(ChaseFlags::RESOLVE_BENEATH) {
-                return Err(ChaseError::new(Errno::XDEV, "absolute symlink not allowed with RESOLVE_BENEATH"));
+                return Err(ChaseError::new(
+                    Errno::XDEV,
+                    "absolute symlink not allowed with RESOLVE_BENEATH",
+                ));
             }
 
             remaining_path.prepend_symlink(&link);
@@ -507,7 +519,10 @@ fn chase_manual(
 
             if let Some(lower) = path_st.last() {
                 if !st.mount_same(lower) || !st.inode_same(lower) {
-                    return Err(ChaseError::new(Errno::XDEV, "parent directory changed during traversal"));
+                    return Err(ChaseError::new(
+                        Errno::XDEV,
+                        "parent directory changed during traversal",
+                    ));
                 }
             }
         } else {
@@ -518,7 +533,10 @@ fn chase_manual(
         // directory. We need the fd to be a directory though, to open the
         // next segment from.
         if !seg.is_last && st.file_type != FileType::Directory {
-            return Err(ChaseError::new(Errno::NOTDIR, "non-final path segment is not a directory"));
+            return Err(ChaseError::new(
+                Errno::NOTDIR,
+                "non-final path segment is not a directory",
+            ));
         }
 
         current = Some(next_fd);
@@ -627,7 +645,11 @@ pub fn chaseat(
 
         if flags.contains(ChaseFlags::MUST_BE_REGULAR) && ft != FileType::RegularFile {
             return Err(ChaseError::new(
-                if ft == FileType::Directory { Errno::ISDIR } else { Errno::BADFD },
+                if ft == FileType::Directory {
+                    Errno::ISDIR
+                } else {
+                    Errno::BADFD
+                },
                 "not a regular file",
             ));
         }

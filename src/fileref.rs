@@ -637,7 +637,11 @@ mod tests {
             .do_resolve::<Any>(c"../..", ChaseFlags::DEBUG_NO_OPENAT2, None, false)
             .unwrap_err();
         assert_eq!(
-            err.get_ref().unwrap().downcast_ref::<ChaseError>().unwrap().errno(),
+            err.get_ref()
+                .unwrap()
+                .downcast_ref::<ChaseError>()
+                .unwrap()
+                .errno(),
             Errno::XDEV,
         );
     }
