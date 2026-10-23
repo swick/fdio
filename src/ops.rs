@@ -12,9 +12,7 @@ use rustix::io::Errno;
 
 use bitflags::bitflags;
 
-use crate::fileref::{
-    fd_path, proc_self_fd, Any, Dir, FileRef, LookupFlags, Regular, Socket, Symlink,
-};
+use crate::fileref::{proc_self_fd, Any, Dir, FileRef, LookupFlags, Regular, Socket, Symlink};
 use std::marker::PhantomData;
 
 fn random_tmp_name() -> CString {
@@ -271,33 +269,33 @@ impl<T> FileRef<T> {
     }
 
     pub fn getxattr(&self, name: &CStr) -> io::Result<Vec<u8>> {
-        let path = fd_path(self.as_fd())?;
+        let path = proc_self_fd(self.as_fd());
         let empty: &mut [u8; 0] = &mut [];
-        let size = fs::lgetxattr(&path, name, empty)?;
+        let size = fs::getxattr(&path, name, empty)?;
         let mut buf = vec![0u8; size];
-        let actual = fs::lgetxattr(&path, name, &mut buf)?;
+        let actual = fs::getxattr(&path, name, &mut buf)?;
         buf.truncate(actual);
         Ok(buf)
     }
 
     pub fn setxattr(&self, name: &CStr, value: &[u8], flags: XattrFlags) -> io::Result<()> {
-        let path = fd_path(self.as_fd())?;
-        Ok(fs::lsetxattr(&path, name, value, flags)?)
+        let path = proc_self_fd(self.as_fd());
+        Ok(fs::setxattr(&path, name, value, flags)?)
     }
 
     pub fn listxattr(&self) -> io::Result<Vec<u8>> {
-        let path = fd_path(self.as_fd())?;
+        let path = proc_self_fd(self.as_fd());
         let empty: &mut [u8; 0] = &mut [];
-        let size = fs::llistxattr(&path, empty)?;
+        let size = fs::listxattr(&path, empty)?;
         let mut buf = vec![0u8; size];
-        let actual = fs::llistxattr(&path, &mut buf)?;
+        let actual = fs::listxattr(&path, &mut buf)?;
         buf.truncate(actual);
         Ok(buf)
     }
 
     pub fn removexattr(&self, name: &CStr) -> io::Result<()> {
-        let path = fd_path(self.as_fd())?;
-        Ok(fs::lremovexattr(&path, name)?)
+        let path = proc_self_fd(self.as_fd());
+        Ok(fs::removexattr(&path, name)?)
     }
 }
 
